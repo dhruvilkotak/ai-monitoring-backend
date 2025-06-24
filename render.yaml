@@ -2,7 +2,7 @@ services:
   - type: web
     name: ai-monitoring-backend
     runtime: java
-    buildCommand: "./mvnw clean package"
+    buildCommand: "mvn clean package"
     startCommand: "java -jar target/*.jar"
     envVars:
       - key: JAVA_VERSION
