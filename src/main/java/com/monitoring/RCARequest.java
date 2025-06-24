@@ -3,8 +3,6 @@ package com.monitoring;
 public class RCARequest {
     private String logContext;
 
-    public RCARequest() {}
-
     public RCARequest(String logContext) {
         this.logContext = logContext;
     }

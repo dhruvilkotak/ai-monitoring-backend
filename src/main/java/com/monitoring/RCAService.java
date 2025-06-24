@@ -7,10 +7,13 @@ import reactor.core.publisher.Mono;
 @Service
 public class RCAService {
 
-    private final WebClient client = WebClient.create("https://ai-rca-service.onrender.com/rca");
+    private final WebClient client = WebClient.builder()
+            .baseUrl("https://ai-rca-service.onrender.com")
+            .build();
 
     public Mono<RCAResponse> callRCA(String log) {
         RCARequest request = new RCARequest(log);
+        System.out.println("Sending to RCA: " + log);
         return client.post()
                 .uri("/rca")
                 .bodyValue(request)

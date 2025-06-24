@@ -20,6 +20,7 @@ public class AlertController {
     // POST /alerts
     @PostMapping
     public Mono<Alert> createAlert(@RequestBody LogInput input) {
+        System.out.println("Received log: " + input.getLog());
         return rcaService.callRCA(input.getLog())
                 .map(response -> {
                     Alert alert = new Alert(
