@@ -9,24 +9,32 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 @RestController
-public class TelemetryController {
+@RequestMapping("/alerts")
+public class AlertController {
 
     @Autowired
     private RCAService rcaService;
 
     private final List<Alert> alerts = new CopyOnWriteArrayList<>();
 
-    @PostMapping("/telemetry")
-    public Mono<Alert> handleTelemetry(@RequestBody LogInput input) {
+    // POST /alerts
+    @PostMapping
+    public Mono<Alert> createAlert(@RequestBody LogInput input) {
         return rcaService.callRCA(input.getLog())
                 .map(response -> {
-                    Alert alert = new Alert(input.getLog(), response.getSummary(), response.getConfidence(), Instant.now().toString());
+                    Alert alert = new Alert(
+                            input.getLog(),
+                            response.getSummary(),
+                            response.getConfidence(),
+                            Instant.now().toString()
+                    );
                     alerts.add(alert);
                     return alert;
                 });
     }
 
-    @GetMapping("/alerts")
+    // GET /alerts
+    @GetMapping
     public List<Alert> getAlerts() {
         return alerts;
     }
