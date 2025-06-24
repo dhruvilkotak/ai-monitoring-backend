@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+@CrossOrigin(origins = "https://ai-infra-monitoring-ui.netlify.app")
 @RestController
 @RequestMapping("/alerts")
 public class AlertController {
