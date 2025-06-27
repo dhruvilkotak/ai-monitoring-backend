@@ -8,7 +8,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-@CrossOrigin(origins = "https://ai-infra-monitoring-ui.netlify.app")
 @RestController
 @RequestMapping("/alerts")
 public class AlertController {
@@ -28,7 +27,8 @@ public class AlertController {
                             input.getLog(),
                             response.getSummary(),
                             response.getConfidence(),
-                            Instant.now().toString()
+                            Instant.now().toString(),
+                            response.getSuggestedFix()
                     );
                     alerts.add(alert);
                     return alert;
