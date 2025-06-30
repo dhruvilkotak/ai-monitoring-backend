@@ -35,10 +35,9 @@ public class GitHubAuthController {
     @GetMapping("/github/login")
     public Mono<Void> githubLogin(ServerWebExchange exchange) {
         String state = UUID.randomUUID().toString();
-
         return exchange.getSession()
-                .flatMap(webSession -> {
-                    webSession.getAttributes().put("oauthState", state);
+                .flatMap(session -> {
+                    session.getAttributes().put("oauthState", state);
                     String url = "https://github.com/login/oauth/authorize"
                             + "?client_id=" + clientId
                             + "&scope=repo,read:user"
@@ -52,8 +51,7 @@ public class GitHubAuthController {
 
     @GetMapping("/github/callback")
     public Mono<String> githubCallback(@RequestParam String code, @RequestParam String state) {
-        return WebClient.create("https://github.com")
-                .post()
+        return webClient.post()
                 .uri("/login/oauth/access_token")
                 .header("Accept", "application/json")
                 .bodyValue(Map.of(
@@ -65,72 +63,43 @@ public class GitHubAuthController {
                 .retrieve()
                 .bodyToMono(Map.class)
                 .flatMap(response -> {
-                    System.out.println("OAuth callback response: " + response);
                     String token = (String) response.get("access_token");
-                    if (token == null) {
-                        throw new RuntimeException("GitHub token is null - OAuth flow failed.");
-                    }
-                    try {
-                        String encryptedToken = EncryptionUtil.encrypt(token);
-                    } catch (Exception e) {
-                        throw new RuntimeException("Encryption failed", e);
+                    if (token == null || token.isBlank()) {
+                        return Mono.error(new RuntimeException("GitHub did not return access_token"));
                     }
 
-                    // now call GitHub /user
-                    return WebClient.create("https://github.com")
-                            .post()
-                            .uri("/login/oauth/access_token")
-                            .header("Accept", "application/json")
-                            .bodyValue(Map.of(
-                                    "client_id", clientId,
-                                    "client_secret", clientSecret,
-                                    "code", code,
-                                    "redirect_uri", redirectUri
-                            ))
+                    String encryptedToken;
+                    try {
+                        encryptedToken = EncryptionUtil.encrypt(token);
+                    } catch (Exception e) {
+                        return Mono.error(new RuntimeException("Encryption failed", e));
+                    }
+
+                    // Now call GitHub /user to get profile
+                    return WebClient.create("https://api.github.com")
+                            .get()
+                            .uri("/user")
+                            .headers(h -> h.setBearerAuth(token))
                             .retrieve()
                             .bodyToMono(Map.class)
-                            .map(tokenresponse -> {
-                                String usertoken = (String) tokenresponse.get("access_token");
+                            .flatMap(profile -> {
+                                System.out.println("GitHub profile: " + profile);
+                                String login = (String) profile.get("login");
+                                Integer id = (Integer) profile.get("id");
 
-                                // lookup user or create new
-                                User user = new User();
-                                try {
-                                    user.setGithubTokenEncrypted(EncryptionUtil.encrypt(usertoken));
-                                } catch (Exception e) {
-                                    throw new RuntimeException("Encryption failed", e);
+                                if (login == null || id == null) {
+                                    return Mono.error(new RuntimeException("GitHub profile information missing"));
                                 }
-                                user.setGithubLogin("someLogin"); // fill from GitHub profile if needed
-                                user.setGithubId(12345L);         // fill from GitHub profile if needed
+
+                                // save to DB
+                                User user = new User();
+                                user.setGithubTokenEncrypted(encryptedToken);
+                                user.setGithubLogin(login);
+                                user.setGithubId(id.longValue());
                                 userRepository.save(user);
 
-                                return "GitHub connected successfully! You can now use CortexOps.";
+                                return Mono.just("✅ GitHub connected successfully! You can now use CortexOps.");
                             });
-                });
-    }
-
-    private Mono<String> storeTokenForUser(String token, WebSession session) {
-        Long userId = (Long) session.getAttribute("userId");
-        if (userId == null) {
-            return Mono.just("No logged in user found in session.");
-        }
-
-        String encryptedToken;
-        try {
-            encryptedToken = EncryptionUtil.encrypt(token);
-        } catch (Exception e) {
-            return Mono.error(new RuntimeException("Encryption failed", e));
-        }
-
-        return Mono.fromCallable(() -> userRepository.findById(userId))
-                .flatMap(optionalUser -> {
-                    if (optionalUser.isPresent()) {
-                        User user = optionalUser.get();
-                        user.setGithubTokenEncrypted(encryptedToken);
-                        userRepository.save(user);
-                        return Mono.just("✅ GitHub connected successfully! You can now use CortexOps.");
-                    } else {
-                        return Mono.just("❌ No user found for this session.");
-                    }
                 });
     }
 }
