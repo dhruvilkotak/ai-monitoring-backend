@@ -101,7 +101,7 @@ public class GitHubAuthController {
                                 // redirect to frontend after success
                                 exchange.getResponse().setStatusCode(HttpStatus.FOUND);
                                 exchange.getResponse().getHeaders().setLocation(
-                                        URI.create("https://YOUR-FRONTEND-DOMAIN/success?connected=true")
+                                        URI.create("https://ai-infra-monitoring-ui.netlify.app/?showMappings=true")
                                 );
                                 return exchange.getResponse().setComplete();
                             });
