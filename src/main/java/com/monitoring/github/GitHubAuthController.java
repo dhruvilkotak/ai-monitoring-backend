@@ -2,6 +2,7 @@ package com.monitoring.github;
 
 import jakarta.annotation.Resource;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -11,6 +12,7 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import java.net.URI;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -105,6 +107,32 @@ public class GitHubAuthController {
                                 );
                                 return exchange.getResponse().setComplete();
                             });
+                });
+    }
+
+    @GetMapping("/github/user-repos")
+    public Mono<List<Map<String, Object>>> getUserRepos(@RequestParam Long userId) {
+        return Mono.fromCallable(() -> userRepository.findById(userId))
+                .flatMap(optionalUser -> {
+                    if (optionalUser.isPresent()) {
+                        User user = optionalUser.get();
+                        String decrypted;
+                        try {
+                            decrypted = EncryptionUtil.decrypt(user.getGithubTokenEncrypted());
+                        } catch (Exception e) {
+                            return Mono.error(new RuntimeException("Could not decrypt token", e));
+                        }
+
+                        return WebClient.create("https://api.github.com")
+                                .get()
+                                .uri("/user/repos")
+                                .headers(h -> h.setBearerAuth(decrypted))
+                                .retrieve()
+                                .bodyToFlux(new ParameterizedTypeReference<Map<String, Object>>() {})
+                                .collectList();
+                    } else {
+                        return Mono.error(new RuntimeException("User not found"));
+                    }
                 });
     }
 }
