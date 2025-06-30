@@ -65,7 +65,11 @@ public class GitHubAuthController {
                 .retrieve()
                 .bodyToMono(Map.class)
                 .flatMap(response -> {
+                    System.out.println("OAuth callback response: " + response);
                     String token = (String) response.get("access_token");
+                    if (token == null) {
+                        throw new RuntimeException("GitHub token is null - OAuth flow failed.");
+                    }
                     try {
                         String encryptedToken = EncryptionUtil.encrypt(token);
                     } catch (Exception e) {
