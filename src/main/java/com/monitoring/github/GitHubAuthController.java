@@ -8,7 +8,6 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ServerWebExchange;
-import org.springframework.web.server.WebSession;
 import reactor.core.publisher.Mono;
 
 import java.net.URI;
@@ -35,9 +34,10 @@ public class GitHubAuthController {
     @GetMapping("/github/login")
     public Mono<Void> githubLogin(ServerWebExchange exchange) {
         String state = UUID.randomUUID().toString();
+
         return exchange.getSession()
-                .flatMap(session -> {
-                    session.getAttributes().put("oauthState", state);
+                .flatMap(webSession -> {
+                    webSession.getAttributes().put("oauthState", state);
                     String url = "https://github.com/login/oauth/authorize"
                             + "?client_id=" + clientId
                             + "&scope=repo,read:user"
@@ -50,7 +50,11 @@ public class GitHubAuthController {
     }
 
     @GetMapping("/github/callback")
-    public Mono<String> githubCallback(@RequestParam String code, @RequestParam String state) {
+    public Mono<Void> githubCallback(
+            @RequestParam String code,
+            @RequestParam String state,
+            ServerWebExchange exchange
+    ) {
         return webClient.post()
                 .uri("/login/oauth/access_token")
                 .header("Accept", "application/json")
@@ -64,8 +68,8 @@ public class GitHubAuthController {
                 .bodyToMono(Map.class)
                 .flatMap(response -> {
                     String token = (String) response.get("access_token");
-                    if (token == null || token.isBlank()) {
-                        return Mono.error(new RuntimeException("GitHub did not return access_token"));
+                    if (token == null) {
+                        return Mono.error(new RuntimeException("OAuth flow failed: no token"));
                     }
 
                     String encryptedToken;
@@ -75,7 +79,7 @@ public class GitHubAuthController {
                         return Mono.error(new RuntimeException("Encryption failed", e));
                     }
 
-                    // Now call GitHub /user to get profile
+                    // ideally get GitHub user profile here
                     return WebClient.create("https://api.github.com")
                             .get()
                             .uri("/user")
@@ -83,22 +87,23 @@ public class GitHubAuthController {
                             .retrieve()
                             .bodyToMono(Map.class)
                             .flatMap(profile -> {
-                                System.out.println("GitHub profile: " + profile);
                                 String login = (String) profile.get("login");
-                                Integer id = (Integer) profile.get("id");
+                                Long githubId = ((Number) profile.get("id")).longValue();
 
-                                if (login == null || id == null) {
-                                    return Mono.error(new RuntimeException("GitHub profile information missing"));
-                                }
-
-                                // save to DB
-                                User user = new User();
-                                user.setGithubTokenEncrypted(encryptedToken);
+                                User user = userRepository.findByGithubId(githubId)
+                                        .orElse(new User());
+                                user.setGithubId(githubId);
                                 user.setGithubLogin(login);
-                                user.setGithubId(id.longValue());
+                                user.setGithubTokenEncrypted(encryptedToken);
+
                                 userRepository.save(user);
 
-                                return Mono.just("✅ GitHub connected successfully! You can now use CortexOps.");
+                                // redirect to frontend after success
+                                exchange.getResponse().setStatusCode(HttpStatus.FOUND);
+                                exchange.getResponse().getHeaders().setLocation(
+                                        URI.create("https://YOUR-FRONTEND-DOMAIN/success?connected=true")
+                                );
+                                return exchange.getResponse().setComplete();
                             });
                 });
     }
