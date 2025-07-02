@@ -53,6 +53,7 @@ public class AlertController {
         StackFrame topFrame = frames.get(0);
         String filePath = extractFilePathFromFrame(topFrame);
         int lineNumber = topFrame.getLineNumber();
+        System.out.println("🔍 [AlertController] User ID : " + userId);
 
         if (userId == null) {
             // user not logged in → just do RCA, no PR, no storage
