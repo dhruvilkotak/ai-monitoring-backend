@@ -34,8 +34,12 @@ public class AlertController {
     @PostMapping
     public Mono<Map<String, Object>> createAlert(
             @RequestParam(required = false) Long userId,
+            @RequestParam(required = false) String repoName,
             @RequestBody LogInput input
     ) {
+        if (repoName == null) {
+            return Mono.error(new RuntimeException("repoName is required for alerts"));
+        }
         var frames = StackTraceParser.parse(input.getLog());
 
         if (frames.isEmpty()) {
@@ -64,6 +68,7 @@ public class AlertController {
         User user = userRepository.findById(userId).orElseThrow();
         RepoMapping repo = repoMappingRepository.findByUser(user)
                 .stream()
+                .filter(r -> r.getRepoName().equalsIgnoreCase(repoName))
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("No repo mapping found for user."));
 
