@@ -4,19 +4,19 @@ import jakarta.annotation.Resource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Controller;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import java.net.URI;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-@Controller
+@RestController
 public class GitHubAuthController {
 
     @Value("${github.client.id}")
@@ -71,13 +71,13 @@ public class GitHubAuthController {
                 .flatMap(response -> {
                     String token = (String) response.get("access_token");
                     if (token == null) {
-                        return Mono.error(new RuntimeException("OAuth flow failed: no token"));
+                        return Mono.error(new RuntimeException("OAuth flow failed: no token received"));
                     }
                     String encryptedToken;
                     try {
                         encryptedToken = EncryptionUtil.encrypt(token);
                     } catch (Exception e) {
-                        return Mono.error(new RuntimeException("Encryption failed", e));
+                        return Mono.error(new RuntimeException("Token encryption failed", e));
                     }
 
                     return WebClient.create("https://api.github.com")
@@ -108,7 +108,7 @@ public class GitHubAuthController {
     }
 
     @GetMapping("/github/user-repos")
-    public Mono<List<Map<String, Object>>> getUserRepos(@RequestParam Long userId) {
+    public Mono<ResponseEntity<?>> getUserRepos(@RequestParam Long userId) {
         return Mono.fromCallable(() -> userRepository.findById(userId))
                 .flatMap(optionalUser -> {
                     if (optionalUser.isPresent()) {
@@ -117,7 +117,8 @@ public class GitHubAuthController {
                         try {
                             decrypted = EncryptionUtil.decrypt(user.getGithubTokenEncrypted());
                         } catch (Exception e) {
-                            return Mono.error(new RuntimeException("Could not decrypt token", e));
+                            return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                                    .body(Map.of("error", "Token decryption failed")));
                         }
                         return WebClient.create("https://api.github.com")
                                 .get()
@@ -125,9 +126,11 @@ public class GitHubAuthController {
                                 .headers(h -> h.setBearerAuth(decrypted))
                                 .retrieve()
                                 .bodyToFlux(new ParameterizedTypeReference<Map<String, Object>>() {})
-                                .collectList();
+                                .collectList()
+                                .map(list -> ResponseEntity.ok(list));
                     } else {
-                        return Mono.error(new RuntimeException("User not found"));
+                        return Mono.just(ResponseEntity.status(HttpStatus.NOT_FOUND)
+                                .body(Map.of("error", "User not found")));
                     }
                 });
     }
