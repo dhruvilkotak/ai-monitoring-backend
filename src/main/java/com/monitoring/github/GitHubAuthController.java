@@ -132,4 +132,12 @@ public class GitHubAuthController {
                     }
                 });
     }
+
+    @GetMapping("/github/is-connected")
+    public Map<String, Boolean> isConnected(@RequestParam Long userId) {
+        boolean connected = userRepository.findById(userId)
+                .map(u -> u.getGithubTokenEncrypted() != null && !u.getGithubTokenEncrypted().isBlank())
+                .orElse(false);
+        return Map.of("connected", connected);
+    }
 }
