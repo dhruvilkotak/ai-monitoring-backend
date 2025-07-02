@@ -18,6 +18,8 @@ public class AlertEntity {
     private String timestamp;
     private String suggestedFix;
 
+    private String prUrl;
+
     public AlertEntity() {}
 
     public AlertEntity(Long userId, String originalLog, String summary, double confidence, String timestamp, String suggestedFix) {
@@ -43,4 +45,6 @@ public class AlertEntity {
     public void setTimestamp(String timestamp) { this.timestamp = timestamp; }
     public String getSuggestedFix() { return suggestedFix; }
     public void setSuggestedFix(String suggestedFix) { this.suggestedFix = suggestedFix; }
+    public String getPrUrl() { return prUrl; }
+    public void setPrUrl(String prUrl) { this.prUrl = prUrl; }
 }

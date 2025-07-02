@@ -32,18 +32,35 @@ public class AlertController {
     private AlertRepository alertRepository;
 
     @PostMapping
-    public Mono<String> createAlert(@RequestBody LogInput input) {
+    public Mono<Map<String, Object>> createAlert(
+            @RequestParam(required = false) Long userId,
+            @RequestBody LogInput input
+    ) {
         var frames = StackTraceParser.parse(input.getLog());
 
         if (frames.isEmpty()) {
-            return Mono.just("No stack trace found in log.");
+            return Mono.just(Map.of(
+                    "summary", "No stack trace found",
+                    "suggestedFix", "None needed",
+                    "confidence", 0.0
+            ));
         }
 
         StackFrame topFrame = frames.get(0);
         String filePath = extractFilePathFromFrame(topFrame);
         int lineNumber = topFrame.getLineNumber();
 
-        Long userId = 1L; // hard-coded for now
+        if (userId == null) {
+            // user not logged in → just do RCA, no PR, no storage
+            return rcaService.suggestFix(input.getLog(), "")
+                    .map(rca -> Map.of(
+                            "summary", rca.getSummary(),
+                            "suggestedFix", rca.getSuggested_fix(),
+                            "confidence", 0.9
+                    ));
+        }
+
+        // user logged in
         User user = userRepository.findById(userId).orElseThrow();
         RepoMapping repo = repoMappingRepository.findByUser(user)
                 .stream()
@@ -56,7 +73,6 @@ public class AlertController {
 
                     return rcaService.suggestFix(input.getLog(), snippet)
                             .flatMap(rcaResponse -> {
-                                // store the alert persistently
                                 AlertEntity entity = new AlertEntity(
                                         userId,
                                         input.getLog(),
@@ -65,17 +81,29 @@ public class AlertController {
                                         Instant.now().toString(),
                                         rcaResponse.getSuggested_fix()
                                 );
-                                alertRepository.save(entity);
 
                                 if ("no-op".equalsIgnoreCase(rcaResponse.getOperation())) {
-                                    return Mono.just("No code change needed, alert recorded.");
+                                    alertRepository.save(entity);
+                                    return Mono.just(Map.of(
+                                            "summary", rcaResponse.getSummary(),
+                                            "suggestedFix", rcaResponse.getSuggested_fix(),
+                                            "confidence", 0.9,
+                                            "note", "No code change needed, alert recorded."
+                                    ));
                                 }
 
                                 int safeLine = gitHubService.adjustLineForComments(fileContent, rcaResponse.getStart_line());
                                 if (safeLine == -1) {
-                                    return Mono.just("Fix suggested, but target line inside an unclosed comment block. Alert recorded, no PR created.");
+                                    alertRepository.save(entity);
+                                    return Mono.just(Map.of(
+                                            "summary", rcaResponse.getSummary(),
+                                            "suggestedFix", rcaResponse.getSuggested_fix(),
+                                            "confidence", 0.9,
+                                            "note", "Fix suggested, but line inside unclosed comment block. Alert recorded, no PR created."
+                                    ));
                                 }
 
+                                // patch code
                                 String[] lines = fileContent.split("\\r?\\n");
                                 StringBuilder patched = new StringBuilder();
                                 int start = Math.max(0, safeLine - 1);
@@ -97,7 +125,13 @@ public class AlertController {
                                         for (int i = start; i < lines.length; i++) patched.append(lines[i]).append("\n");
                                         break;
                                     default:
-                                        return Mono.just("Unknown operation from RCA. Alert recorded, no PR created.");
+                                        alertRepository.save(entity);
+                                        return Mono.just(Map.of(
+                                                "summary", rcaResponse.getSummary(),
+                                                "suggestedFix", rcaResponse.getSuggested_fix(),
+                                                "confidence", 0.9,
+                                                "note", "Unknown operation from RCA. Alert recorded, no PR created."
+                                        ));
                                 }
 
                                 String fixBranch = "cortexops-fix-" + System.currentTimeMillis();
@@ -115,7 +149,18 @@ public class AlertController {
                                                 fixBranch,
                                                 "Automated RCA Fix",
                                                 "This PR was created automatically by CortexOps."
-                                        )));
+                                        ).flatMap(pr -> {
+                                            entity.setPrUrl(pr);
+                                            alertRepository.save(entity);
+
+                                            return Mono.just(Map.of(
+                                                    "summary", rcaResponse.getSummary(),
+                                                    "suggestedFix", rcaResponse.getSuggested_fix(),
+                                                    "confidence", 0.9,
+                                                    "note", "PR created on branch " + fixBranch,
+                                                    "prUrl", pr
+                                            ));
+                                        })));
                             });
                 });
     }
