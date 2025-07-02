@@ -1,10 +1,6 @@
 package com.monitoring.alerts;
 
-import com.monitoring.github.GitHubService;
-import com.monitoring.github.RepoMapping;
-import com.monitoring.github.RepoMappingRepository;
-import com.monitoring.github.User;
-import com.monitoring.github.UserRepository;
+import com.monitoring.github.*;
 import com.monitoring.rca.RCAService;
 import com.monitoring.rca.StackFrame;
 import com.monitoring.rca.StackTraceParser;
@@ -15,7 +11,6 @@ import reactor.core.publisher.Mono;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 @RestController
 @RequestMapping("/alerts")
@@ -33,7 +28,8 @@ public class AlertController {
     @Autowired
     private RCAService rcaService;
 
-    private final List<Alert> alerts = new CopyOnWriteArrayList<>();
+    @Autowired
+    private AlertRepository alertRepository;
 
     @PostMapping
     public Mono<String> createAlert(@RequestBody LogInput input) {
@@ -60,13 +56,16 @@ public class AlertController {
 
                     return rcaService.suggestFix(input.getLog(), snippet)
                             .flatMap(rcaResponse -> {
-                                alerts.add(new Alert(
+                                // store the alert persistently
+                                AlertEntity entity = new AlertEntity(
+                                        userId,
                                         input.getLog(),
                                         rcaResponse.getSummary(),
                                         0.9,
                                         Instant.now().toString(),
                                         rcaResponse.getSuggested_fix()
-                                ));
+                                );
+                                alertRepository.save(entity);
 
                                 if ("no-op".equalsIgnoreCase(rcaResponse.getOperation())) {
                                     return Mono.just("No code change needed, alert recorded.");
@@ -77,48 +76,26 @@ public class AlertController {
                                     return Mono.just("Fix suggested, but target line inside an unclosed comment block. Alert recorded, no PR created.");
                                 }
 
-                                // rebuild patched content
                                 String[] lines = fileContent.split("\\r?\\n");
                                 StringBuilder patched = new StringBuilder();
-
                                 int start = Math.max(0, safeLine - 1);
                                 int end = Math.min(lines.length, rcaResponse.getEnd_line());
 
                                 switch (rcaResponse.getOperation()) {
                                     case "replace":
-                                        for (int i = 0; i < start; i++) {
-                                            patched.append(lines[i]).append("\n");
-                                        }
-                                        for (String line : rcaResponse.getFinal_code()) {
-                                            patched.append(line).append("\n");
-                                        }
-                                        for (int i = end; i < lines.length; i++) {
-                                            patched.append(lines[i]).append("\n");
-                                        }
+                                        for (int i = 0; i < start; i++) patched.append(lines[i]).append("\n");
+                                        for (String line : rcaResponse.getFinal_code()) patched.append(line).append("\n");
+                                        for (int i = end; i < lines.length; i++) patched.append(lines[i]).append("\n");
                                         break;
-
                                     case "delete":
-                                        for (int i = 0; i < start; i++) {
-                                            patched.append(lines[i]).append("\n");
-                                        }
-                                        // skip [start, end)
-                                        for (int i = end; i < lines.length; i++) {
-                                            patched.append(lines[i]).append("\n");
-                                        }
+                                        for (int i = 0; i < start; i++) patched.append(lines[i]).append("\n");
+                                        for (int i = end; i < lines.length; i++) patched.append(lines[i]).append("\n");
                                         break;
-
                                     case "insert":
-                                        for (int i = 0; i < start; i++) {
-                                            patched.append(lines[i]).append("\n");
-                                        }
-                                        for (String line : rcaResponse.getFinal_code()) {
-                                            patched.append(line).append("\n");
-                                        }
-                                        for (int i = start; i < lines.length; i++) {
-                                            patched.append(lines[i]).append("\n");
-                                        }
+                                        for (int i = 0; i < start; i++) patched.append(lines[i]).append("\n");
+                                        for (String line : rcaResponse.getFinal_code()) patched.append(line).append("\n");
+                                        for (int i = start; i < lines.length; i++) patched.append(lines[i]).append("\n");
                                         break;
-
                                     default:
                                         return Mono.just("Unknown operation from RCA. Alert recorded, no PR created.");
                                 }
@@ -143,6 +120,11 @@ public class AlertController {
                 });
     }
 
+    @GetMapping
+    public List<AlertEntity> getAlerts(@RequestParam Long userId) {
+        return alertRepository.findByUserId(userId);
+    }
+
     private String extractFilePathFromFrame(StackFrame frame) {
         String fileName = frame.getFileName();
         String ext = fileName.substring(fileName.lastIndexOf('.') + 1);
@@ -162,10 +144,5 @@ public class AlertController {
         } else {
             return root + fileName;
         }
-    }
-
-    @GetMapping
-    public List<Alert> getAlerts() {
-        return alerts;
     }
 }
