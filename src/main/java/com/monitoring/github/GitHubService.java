@@ -171,7 +171,6 @@ public class GitHubService {
                 .retrieve()
                 .bodyToMono(Map.class)
                 .map(content -> {
-                    System.out.println("DEBUG GitHub raw content JSON: " + content);
 
                     if (content.containsKey("encoding") && "base64".equals(content.get("encoding"))) {
                         String encoded = (String) content.get("content");
@@ -182,7 +181,6 @@ public class GitHubService {
                             // remove any line breaks or spaces
                             byte[] decodedBytes = Base64.getDecoder().decode(encoded.replaceAll("\\s", ""));
                             String decoded = new String(decodedBytes, StandardCharsets.UTF_8);
-                            System.out.println("✅ Successfully decoded first 100 characters:\n" + decoded.substring(0, Math.min(100, decoded.length())));
                             return decoded;
                         } catch (IllegalArgumentException ex) {
                             throw new RuntimeException("Base64 decode failed on cleaned GitHub content: "
