@@ -34,6 +34,10 @@ public class RCAService {
                 ))
                 .retrieve()
                 .bodyToMono(RCAResponse.class)
+                .doOnNext(response -> {
+                    System.out.println("✅ [RCAService] RCA response received:");
+                    System.out.println(response);
+                })
                 .doOnError(WebClientResponseException.class, ex -> {
                     System.err.println("❌ [RCAService] RCA responded with error: " + ex.getResponseBodyAsString());
                 })

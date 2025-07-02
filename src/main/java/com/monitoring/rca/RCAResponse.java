@@ -8,7 +8,11 @@ public class RCAResponse {
     private String file_path;
     private int start_line;
     private int end_line;
-    private List<String> replacement_code;
+    private String operation;   // "insert", "replace", "delete", "no-op"
+    private List<String> final_code;
+
+    public RCAResponse() {
+    }
 
     public String getSummary() {
         return summary;
@@ -50,23 +54,19 @@ public class RCAResponse {
         this.end_line = end_line;
     }
 
-    public List<String> getReplacement_code() {
-        return replacement_code;
+    public String getOperation() {
+        return operation;
     }
 
-    public void setReplacement_code(List<String> replacement_code) {
-        this.replacement_code = replacement_code;
+    public void setOperation(String operation) {
+        this.operation = operation;
     }
 
-    @Override
-    public String toString() {
-        return "RCAResponse{" +
-                "summary='" + summary + '\'' +
-                ", suggested_fix='" + suggested_fix + '\'' +
-                ", file_path='" + file_path + '\'' +
-                ", start_line=" + start_line +
-                ", end_line=" + end_line +
-                ", replacement_code=" + replacement_code +
-                '}';
+    public List<String> getFinal_code() {
+        return final_code;
+    }
+
+    public void setFinal_code(List<String> final_code) {
+        this.final_code = final_code;
     }
 }
