@@ -62,7 +62,7 @@ public class AlertController {
 
                     return rcaService.suggestFix(input.getLog(), snippet)
                             .flatMap(rcaResponse -> {
-                                // store in alerts
+                                // store in-memory alerts
                                 alerts.add(new Alert(
                                         input.getLog(),
                                         rcaResponse.getSummary(),
@@ -76,10 +76,16 @@ public class AlertController {
                                     return Mono.just("No fix suggested by RCA, but alert recorded.");
                                 }
 
-                                // patch the actual file, preserving lines
+                                // 🔥 check if target line is in a comment
+                                int safeLine = gitHubService.adjustLineForComments(fileContent, rcaResponse.getStart_line());
+                                if (safeLine == -1) {
+                                    return Mono.just("Fix suggested, but the line is inside an unclosed comment block. Alert recorded, no PR created.");
+                                }
+
+                                // rebuild file
                                 String[] lines = fileContent.split("\\r?\\n");
-                                int start = Math.max(0, rcaResponse.getStart_line() - 1); // 0-based
-                                int end = Math.min(lines.length, rcaResponse.getEnd_line()); // exclusive
+                                int start = Math.max(0, safeLine - 1); // safe 0-based
+                                int end = Math.min(lines.length, rcaResponse.getEnd_line());
 
                                 StringBuilder patched = new StringBuilder();
                                 for (int i = 0; i < start; i++) {
@@ -131,7 +137,6 @@ public class AlertController {
         if (ext.equals("java")) {
             String classPath = frame.getClassName().replace('.', '/');
             String packageFolder = classPath.substring(0, classPath.lastIndexOf('/'));
-            // match your actual repo
             return "src/" + packageFolder + "/" + fileName;
         } else {
             return root + fileName;

@@ -216,4 +216,40 @@ public class GitHubService {
         }
         return snippet.toString();
     }
+
+    /**
+     * Checks whether a given line in the file is inside a comment block,
+     * and optionally closes it if needed before applying replacement code.
+     *
+     * @param fileContent the entire source file
+     * @param targetLine  the 1-based line to patch
+     * @return adjusted startLine to patch safely
+     */
+    public int adjustLineForComments(String fileContent, int targetLine) {
+        if (fileContent == null || fileContent.isEmpty()) return targetLine;
+
+        String[] lines = fileContent.split("\\r?\\n");
+        int zeroBasedLine = targetLine - 1;
+
+        boolean insideComment = false;
+        for (int i = 0; i <= zeroBasedLine; i++) {
+            String line = lines[i];
+            if (line.contains("/*")) insideComment = true;
+            if (line.contains("*/")) insideComment = false;
+        }
+
+        if (insideComment) {
+            System.out.println("⚠️ The target line is inside a block comment. Will attempt to adjust.");
+            // look forward to close comment
+            for (int i = zeroBasedLine; i < lines.length; i++) {
+                if (lines[i].contains("*/")) {
+                    return i + 2; // next line after closing the block
+                }
+            }
+            // fallback: do not patch if comment never closes
+            return -1;
+        }
+
+        return targetLine;
+    }
 }
