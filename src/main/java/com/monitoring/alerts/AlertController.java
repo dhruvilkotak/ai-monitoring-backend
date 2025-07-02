@@ -53,9 +53,10 @@ public class AlertController {
         StackFrame topFrame = frames.get(0);
         String filePath = extractFilePathFromFrame(topFrame);
         int lineNumber = topFrame.getLineNumber();
-        System.out.println("🔍 [AlertController] User ID : " + userId);
+        System.out.println("🔍 [AlertController] User ID : " + userId +"  repo name :" + repoName);
 
         if (userId == null) {
+            System.out.println("🔍 [AlertController] User ID is null. It will just return suggest fix without saving the alert details." + userId);
             // user not logged in → just do RCA, no PR, no storage
             return rcaService.suggestFix(input.getLog(), "")
                     .map(rca -> Map.of(
@@ -89,6 +90,7 @@ public class AlertController {
                                 );
 
                                 if ("no-op".equalsIgnoreCase(rcaResponse.getOperation())) {
+                                    System.out.println("No ops");
                                     alertRepository.save(entity);
                                     return Mono.just(Map.of(
                                             "summary", rcaResponse.getSummary(),
@@ -100,6 +102,7 @@ public class AlertController {
 
                                 int safeLine = gitHubService.adjustLineForComments(fileContent, rcaResponse.getStart_line());
                                 if (safeLine == -1) {
+                                    System.out.println("safe line -1");
                                     alertRepository.save(entity);
                                     return Mono.just(Map.of(
                                             "summary", rcaResponse.getSummary(),
@@ -139,7 +142,7 @@ public class AlertController {
                                                 "note", "Unknown operation from RCA. Alert recorded, no PR created."
                                         ));
                                 }
-
+                                System.out.println("creating PR");
                                 String fixBranch = "cortexops-fix-" + System.currentTimeMillis();
                                 return gitHubService.createBranch(user, repo, fixBranch)
                                         .flatMap(branchResult -> gitHubService.commitFix(
@@ -156,6 +159,7 @@ public class AlertController {
                                                 "Automated RCA Fix",
                                                 "This PR was created automatically by CortexOps."
                                         ).flatMap(pr -> {
+                                            System.out.println("created PR : " + pr);
                                             entity.setPrUrl(pr);
                                             alertRepository.save(entity);
 
