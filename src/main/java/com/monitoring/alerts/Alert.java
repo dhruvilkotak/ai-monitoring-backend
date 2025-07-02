@@ -1,4 +1,4 @@
-package com.monitoring;
+package com.monitoring.alerts;
 
 public class Alert {
     private final String originalLog;

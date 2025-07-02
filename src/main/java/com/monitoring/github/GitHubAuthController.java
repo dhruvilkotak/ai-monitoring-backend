@@ -4,8 +4,9 @@ import jakarta.annotation.Resource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
@@ -15,8 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-@RestController
-@RequestMapping("/github")
+@Controller
 public class GitHubAuthController {
 
     @Value("${github.client.id}")
@@ -31,27 +31,27 @@ public class GitHubAuthController {
     @Resource
     private UserRepository userRepository;
 
-    private final WebClient webClient = WebClient.builder()
-            .baseUrl("https://github.com")
-            .build();
+    private final WebClient webClient = WebClient.builder().baseUrl("https://github.com").build();
 
-    @GetMapping("/login")
+    @GetMapping("/github/login")
     public Mono<Void> githubLogin(ServerWebExchange exchange) {
         String state = UUID.randomUUID().toString();
+
         return exchange.getSession()
-                .flatMap(session -> {
-                    session.getAttributes().put("oauthState", state);
-                    String url = String.format(
-                            "https://github.com/login/oauth/authorize?client_id=%s&scope=repo,read:user&state=%s&redirect_uri=%s",
-                            clientId, state, redirectUri
-                    );
+                .flatMap(webSession -> {
+                    webSession.getAttributes().put("oauthState", state);
+                    String url = "https://github.com/login/oauth/authorize"
+                            + "?client_id=" + clientId
+                            + "&scope=repo,read:user"
+                            + "&state=" + state
+                            + "&redirect_uri=" + redirectUri;
                     exchange.getResponse().setStatusCode(HttpStatus.FOUND);
                     exchange.getResponse().getHeaders().setLocation(URI.create(url));
                     return exchange.getResponse().setComplete();
                 });
     }
 
-    @GetMapping("/callback")
+    @GetMapping("/github/callback")
     public Mono<Void> githubCallback(
             @RequestParam String code,
             @RequestParam String state,
@@ -71,9 +71,8 @@ public class GitHubAuthController {
                 .flatMap(response -> {
                     String token = (String) response.get("access_token");
                     if (token == null) {
-                        return Mono.error(new IllegalStateException("OAuth flow failed: no token"));
+                        return Mono.error(new RuntimeException("OAuth flow failed: no token"));
                     }
-
                     String encryptedToken;
                     try {
                         encryptedToken = EncryptionUtil.encrypt(token);
@@ -81,7 +80,6 @@ public class GitHubAuthController {
                         return Mono.error(new RuntimeException("Encryption failed", e));
                     }
 
-                    // get profile from GitHub
                     return WebClient.create("https://api.github.com")
                             .get()
                             .uri("/user")
@@ -100,39 +98,36 @@ public class GitHubAuthController {
 
                                 userRepository.save(user);
 
-                                String redirectUrl = String.format(
-                                        "https://ai-infra-monitoring-ui.netlify.app/onboard?userId=%d", user.getId()
-                                );
                                 exchange.getResponse().setStatusCode(HttpStatus.FOUND);
-                                exchange.getResponse().getHeaders().setLocation(URI.create(redirectUrl));
+                                exchange.getResponse().getHeaders().setLocation(
+                                        URI.create("https://ai-infra-monitoring-ui.netlify.app/onboard?userId=" + user.getId())
+                                );
                                 return exchange.getResponse().setComplete();
                             });
                 });
     }
 
-    @GetMapping("/user-repos")
-    public Mono<ResponseEntity<List<Map<String, Object>>>> getUserRepos(@RequestParam Long userId) {
+    @GetMapping("/github/user-repos")
+    public Mono<List<Map<String, Object>>> getUserRepos(@RequestParam Long userId) {
         return Mono.fromCallable(() -> userRepository.findById(userId))
                 .flatMap(optionalUser -> {
                     if (optionalUser.isPresent()) {
                         User user = optionalUser.get();
-                        String decryptedToken;
+                        String decrypted;
                         try {
-                            decryptedToken = EncryptionUtil.decrypt(user.getGithubTokenEncrypted());
+                            decrypted = EncryptionUtil.decrypt(user.getGithubTokenEncrypted());
                         } catch (Exception e) {
                             return Mono.error(new RuntimeException("Could not decrypt token", e));
                         }
-
                         return WebClient.create("https://api.github.com")
                                 .get()
                                 .uri("/user/repos")
-                                .headers(h -> h.setBearerAuth(decryptedToken))
+                                .headers(h -> h.setBearerAuth(decrypted))
                                 .retrieve()
                                 .bodyToFlux(new ParameterizedTypeReference<Map<String, Object>>() {})
-                                .collectList()
-                                .map(list -> ResponseEntity.ok(list));
+                                .collectList();
                     } else {
-                        return Mono.just(ResponseEntity.status(HttpStatus.NOT_FOUND).build());
+                        return Mono.error(new RuntimeException("User not found"));
                     }
                 });
     }

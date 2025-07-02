@@ -4,6 +4,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -152,5 +154,66 @@ public class GitHubService {
                     System.out.println("✅ PR opened at: " + prUrl);
                     return prUrl;
                 });
+    }
+
+    public Mono<String> fetchFileContent(User user, RepoMapping repo, String branch, String filePath) {
+        String token;
+        try {
+            token = EncryptionUtil.decrypt(user.getGithubTokenEncrypted());
+        } catch (Exception e) {
+            return Mono.error(new RuntimeException("Failed to decrypt GitHub token", e));
+        }
+
+        return webClient.get()
+                .uri("/repos/{owner}/{repo}/contents/{filePath}?ref={branch}",
+                        repo.getOwner(), repo.getRepoName(), filePath, branch)
+                .headers(h -> h.setBearerAuth(token))
+                .retrieve()
+                .bodyToMono(Map.class)
+                .map(content -> {
+                    System.out.println("DEBUG GitHub raw content JSON: " + content);
+
+                    if (content.containsKey("encoding") && "base64".equals(content.get("encoding"))) {
+                        String encoded = (String) content.get("content");
+                        if (encoded == null) {
+                            throw new RuntimeException("GitHub returned null content with encoding=base64");
+                        }
+                        try {
+                            // remove any line breaks or spaces
+                            byte[] decodedBytes = Base64.getDecoder().decode(encoded.replaceAll("\\s", ""));
+                            String decoded = new String(decodedBytes, StandardCharsets.UTF_8);
+                            System.out.println("✅ Successfully decoded first 100 characters:\n" + decoded.substring(0, Math.min(100, decoded.length())));
+                            return decoded;
+                        } catch (IllegalArgumentException ex) {
+                            throw new RuntimeException("Base64 decode failed on cleaned GitHub content: "
+                                    + encoded.substring(0, Math.min(30, encoded.length())) + "...", ex);
+                        }
+                    } else {
+                        throw new RuntimeException("GitHub did not return base64 encoding or missing field: " + content);
+                    }
+                });
+    }
+
+    /**
+     * Extracts a snippet of code around the failure line.
+     *
+     * @param fileContent Full file content
+     * @param lineNumber  The line with the error (1-based)
+     * @param radius      Number of surrounding lines to include before/after
+     * @return Snippet of source code
+     */
+    public String extractSnippet(String fileContent, int lineNumber, int radius) {
+        if (fileContent == null || fileContent.isEmpty()) {
+            return "";
+        }
+        String[] lines = fileContent.split("\\r?\\n");
+        int start = Math.max(0, lineNumber - radius - 1); // zero-based index
+        int end = Math.min(lines.length, lineNumber + radius);
+
+        StringBuilder snippet = new StringBuilder();
+        for (int i = start; i < end; i++) {
+            snippet.append(lines[i]).append("\n");
+        }
+        return snippet.toString();
     }
 }

@@ -1,4 +1,4 @@
-package com.monitoring;
+package com.monitoring.rca;
 
 public class RCARequest {
     private String logContext;
