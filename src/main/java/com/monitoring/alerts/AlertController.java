@@ -116,7 +116,8 @@ public class AlertController {
                                 StringBuilder patched = new StringBuilder();
                                 int start = Math.max(0, safeLine - 1);
                                 int end = Math.min(lines.length, rcaResponse.getEnd_line());
-
+                                System.out.println("Saved entity:"+ entity.getId());
+                                alertRepository.save(entity);
                                 switch (rcaResponse.getOperation()) {
                                     case "replace":
                                         for (int i = 0; i < start; i++) patched.append(lines[i]).append("\n");
@@ -134,7 +135,6 @@ public class AlertController {
                                         break;
                                     default:
                                         System.out.println("⚠️ Unknown RCA operation; recording alert only.");
-                                        alertRepository.save(entity);
                                         return Mono.just(Map.of(
                                                 "summary", rcaResponse.getSummary(),
                                                 "suggestedFix", rcaResponse.getSuggested_fix(),
