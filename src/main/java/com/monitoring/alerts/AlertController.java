@@ -32,7 +32,7 @@ public class AlertController {
     private AlertRepository alertRepository;
 
     @PostMapping
-    public Mono<Map<String, Object>> createAlert(
+    public Mono<? extends Object> createAlert(
             @RequestParam(required = false) Long userId,
             @RequestParam(required = false) String repoName,
             @RequestBody LogInput input
@@ -41,7 +41,6 @@ public class AlertController {
             return Mono.error(new RuntimeException("repoName is required for alerts"));
         }
         var frames = StackTraceParser.parse(input.getLog());
-
         if (frames.isEmpty()) {
             return Mono.just(Map.of(
                     "summary", "No stack trace found",
@@ -53,11 +52,10 @@ public class AlertController {
         StackFrame topFrame = frames.get(0);
         String filePath = extractFilePathFromFrame(topFrame);
         int lineNumber = topFrame.getLineNumber();
-        System.out.println("🔍 [AlertController] User ID : " + userId +"  repo name :" + repoName);
+        System.out.println("🔍 [AlertController] User ID : " + userId + " repo name: " + repoName);
 
         if (userId == null) {
-            System.out.println("🔍 [AlertController] User ID is null. It will just return suggest fix without saving the alert details." + userId);
-            // user not logged in → just do RCA, no PR, no storage
+            System.out.println("🔍 [AlertController] User ID is null. It will just return suggest fix without saving the alert details.");
             return rcaService.suggestFix(input.getLog(), "")
                     .map(rca -> Map.of(
                             "summary", rca.getSummary(),
@@ -66,13 +64,14 @@ public class AlertController {
                     ));
         }
 
-        // user logged in
         User user = userRepository.findById(userId).orElseThrow();
         RepoMapping repo = repoMappingRepository.findByUser(user)
                 .stream()
                 .filter(r -> r.getRepoName().equalsIgnoreCase(repoName))
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("No repo mapping found for user."));
+
+        System.out.println("✅ Repo mapping found : " + repo.getRepoName() + " for user:" + repo.getUser().getId());
 
         return gitHubService.fetchFileContent(user, repo, repo.getBranch(), filePath)
                 .flatMap(fileContent -> {
@@ -90,7 +89,7 @@ public class AlertController {
                                 );
 
                                 if ("no-op".equalsIgnoreCase(rcaResponse.getOperation())) {
-                                    System.out.println("No ops");
+                                    System.out.println("✅ RCA returned no-op; saving alert without PR.");
                                     alertRepository.save(entity);
                                     return Mono.just(Map.of(
                                             "summary", rcaResponse.getSummary(),
@@ -102,7 +101,7 @@ public class AlertController {
 
                                 int safeLine = gitHubService.adjustLineForComments(fileContent, rcaResponse.getStart_line());
                                 if (safeLine == -1) {
-                                    System.out.println("safe line -1");
+                                    System.out.println("⚠️ Safe line is -1; recording alert but skipping PR.");
                                     alertRepository.save(entity);
                                     return Mono.just(Map.of(
                                             "summary", rcaResponse.getSummary(),
@@ -134,6 +133,7 @@ public class AlertController {
                                         for (int i = start; i < lines.length; i++) patched.append(lines[i]).append("\n");
                                         break;
                                     default:
+                                        System.out.println("⚠️ Unknown RCA operation; recording alert only.");
                                         alertRepository.save(entity);
                                         return Mono.just(Map.of(
                                                 "summary", rcaResponse.getSummary(),
@@ -142,8 +142,10 @@ public class AlertController {
                                                 "note", "Unknown operation from RCA. Alert recorded, no PR created."
                                         ));
                                 }
-                                System.out.println("creating PR");
+
                                 String fixBranch = "cortexops-fix-" + System.currentTimeMillis();
+
+                                System.out.println("🚀 creating PR for branch: " + fixBranch);
                                 return gitHubService.createBranch(user, repo, fixBranch)
                                         .flatMap(branchResult -> gitHubService.commitFix(
                                                 user,
@@ -152,17 +154,17 @@ public class AlertController {
                                                 filePath,
                                                 patched.toString(),
                                                 "Automated RCA fix"
-                                        ).flatMap(commitResult -> gitHubService.createPullRequest(
+                                        ))
+                                        .flatMap(commitResult -> gitHubService.createPullRequest(
                                                 user,
                                                 repo,
                                                 fixBranch,
                                                 "Automated RCA Fix",
                                                 "This PR was created automatically by CortexOps."
                                         ).flatMap(pr -> {
-                                            System.out.println("created PR : " + pr);
+                                            System.out.println("✅ created PR : " + pr);
                                             entity.setPrUrl(pr);
                                             alertRepository.save(entity);
-
                                             return Mono.just(Map.of(
                                                     "summary", rcaResponse.getSummary(),
                                                     "suggestedFix", rcaResponse.getSuggested_fix(),
@@ -170,7 +172,17 @@ public class AlertController {
                                                     "note", "PR created on branch " + fixBranch,
                                                     "prUrl", pr
                                             ));
-                                        })));
+                                        })
+                                        .onErrorResume(ex -> {
+                                            System.err.println("⚠️ PR creation failed: " + ex.getMessage());
+                                            alertRepository.save(entity);
+                                            return Mono.just(Map.of(
+                                                    "summary", rcaResponse.getSummary(),
+                                                    "suggestedFix", rcaResponse.getSuggested_fix(),
+                                                    "confidence", 0.9,
+                                                    "note", "Failed to create PR, but alert recorded"
+                                            ));
+                                        }));
                             });
                 });
     }
